@@ -1,6 +1,7 @@
 ## credit: https://www.youtube.com/watch?v=rfR9Nrpfnyg
 library(tidyverse)
 library(gapminder)
+library(ggplot2)
 View(gapminder)
 
 gapminder %>%
