@@ -1,0 +1,1074 @@
+---
+title: "This is a replica of all the R scripts"
+author: "Jianying"
+date: "Last complied `r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(flextable)
+library(haven)
+library(tidyverse)
+```
+
+# Getting sample ADaM data from PHUSE 
+
+```{r ADaM}
+adam_path <- "https://github.com/phuse-org/TestDataFactory/raw/main/Updated/TDF_ADaM/"
+adsl <- haven::read_xpt(paste0(adam_path, "adsl.xpt"))
+
+# Select a few variables
+adsl <- adsl %>%
+  dplyr::select(STUDYID, USUBJID, SUBJID, AGE, TRT01P, TRTSDT, TRTEDT, RACE, SEX, DISCONFL)
+
+```
+
+# Take a quick peek
+
+```{r quick peek}
+str(adsl)
+summary(adsl)
+
+table(adsl$SEX)
+
+adsl %>%
+  count(SEX)
+
+#for multiple variables
+table(adsl$SEX, adsl$TRT01P, adsl$RACE) 
+
+adsl %>%
+  count(SEX, TRT01P, RACE)
+```
+
+# R processing that matches SAS 
+
+```{r basic}
+
+# to keep (only) SUBJID
+adsl %>%
+  select(SUBJID) %>%
+  head() # keep only first 6 rows
+
+# to keep all variables except SUBJID
+adsl %>%
+  select(-SUBJID) %>%
+  head()
+
+# select female
+
+adsl %>%
+  filter(SEX == "F") %>%
+  head() 
+
+# multiple conditions:
+adsl %>%
+  filter(SEX == "F" & AGE > 70) %>%
+  head() 
+
+# ascending
+adsl %>%
+  arrange(AGE)%>%
+  head() 
+
+# descending
+adsl %>%
+  arrange(-AGE)%>%
+  head() 
+
+## with case_when function
+
+adsl %>%
+  mutate(AGEGR1 = case_when(
+    AGE > 50 ~"> 50 years old",
+    AGE <= 50 ~"<= 50 years old",
+  )) %>%
+  head()
+
+
+```
+# Handling missing values
+```{r missingVal}
+# Unlike SAS, space(s) != blank string in R, 
+" " == ""
+
+# This is true 
+"" == ""
+
+# is.na to check if it's missing
+c(" ", "Y", NA_character_) %>% is.na()
+
+# NA is non-comparable, result in NA
+c(" ", "Y", NA_character_) != "Y"
+
+# add one more row to the data with missing AGE and DISCONFL, select the first 3 rows
+adsl_na_example <- adsl %>% 
+  add_row(SUBJID = "1", DISCONFL = NA_character_, .before = T) %>% 
+  slice(1:3) %>% 
+  select(SUBJID, DISCONFL)
+# demo data
+adsl_na_example %>% head()
+
+adsl_na_example %>% filter(DISCONFL != "Y")
+
+# include is.na(DISCONFL) in the filter
+adsl_na_example %>% filter(DISCONFL != "Y" | is.na(DISCONFL))
+
+## continue with sortingh
+
+# add one more row to the data with missing AGE and DISCONFL 
+# select the first 3 rows
+adsl_na_sort <- adsl %>% 
+  add_row(SUBJID = "1", AGE = NA_integer_, .before = T) %>% 
+  slice(1:5) %>% 
+  select(SUBJID, AGE)
+  
+# ascending
+adsl_na_sort %>%
+  arrange(AGE)
+  
+# to be consistent with SAS - NA at the top when ascending
+adsl_na_sort %>%
+  arrange(!is.na(AGE), AGE)
+  
+SUBJID <- sample(adsl$SUBJID, 100, replace = FALSE)
+WEIGHT <- sample(50:100, 100, replace = TRUE)
+
+adsl_weight <- data.frame(SUBJID, WEIGHT)
+
+# inner join
+adsl%>%
+  inner_join(adsl_weight, by = "SUBJID") 
+
+# outer join
+adsl %>%
+  full_join(adsl_weight, by = "SUBJID")
+
+# left join
+adsl %>%
+  left_join(adsl_weight, by = "SUBJID")
+  
+# first 5 records of adsl
+adsl_1 <- adsl[c(1:5),]
+
+# the next 5 records of adsl
+adsl_2 <- adsl[c(6:10),]
+
+# tidyverse method - bind_rows()
+adsl_stacked <- adsl_1 %>%
+  bind_rows(adsl_2) 
+
+```
+
+# Clinical trial data
+
+```{r dataSource}
+library(help = "datasets")
+data("ToothGrowth")
+
+library(haven)
+
+adsl <- read_xpt("https://github.com/phuse-org/TestDataFactory/raw/main/Updated/TDF_ADaM/adsl.xpt")
+adsl %>%  dim()
+
+```
+
+
+# Work on ADaM data and build table with Tplyr
+
+```{r Tplyr_flextable }
+
+
+
+adsl <- read_xpt("https://github.com/phuse-org/TestDataFactory/raw/main/Updated/TDF_ADaM/adsl.xpt")
+
+## string formatting with Tplyr
+
+library(Tplyr)
+
+options(
+  
+  # Categorical variable defaults
+  tplyr.count_layer_default_formats =
+    list(n_counts = f_str("xxx [xx.xx%]", n, pct)),
+  
+  # Continuous variable defaults
+  tplyr.desc_layer_default_formats =
+    list('N'         = f_str('xx', n),
+         'Mean [SD]' = f_str('xx.xx [xx.xxx]', mean, sd),
+         'Median'    = f_str('xx.x', median),
+         'Min, Max'  = f_str('xx, xx', min, max))
+)
+
+
+library(dplyr)
+
+# Initiate Tplyr, specify treatment variable, optional where condition
+
+my_table <-  tplyr_table(adsl, TRT01P, where = SAFFL == "Y") %>%
+  
+  # Add a total group column
+  add_total_group() %>%
+  
+  # Add individual variables here
+  add_layer(group_desc(AGE, b = "Age (years)")) %>%
+  add_layer(group_count(AGEGR1, b = "Age Group 1 (years)")) %>%
+  add_layer(group_count(SEX, b = "Gender")) %>%
+  add_layer(group_count(ETHNIC, b = "Ethnicity")) %>%
+  add_layer(group_desc(BMIBL, b = "Baseline Body Mass Index (kg/m2)")) %>%
+  
+  # Build
+  build()
+
+head(my_table, n = 9)
+
+
+my_table <- my_table %>%
+  
+  # remove repeating labels
+  apply_row_masks(., row_breaks = TRUE) %>%
+  
+  # specify order of relevant variables
+  select(row_label1, 
+         row_label2,
+         `var1_Xanomeline High Dose`,
+         `var1_Xanomeline Low Dose`,
+         var1_Placebo,
+         var1_Total)  
+
+library(flextable)
+
+## a basic flextable
+my_flextable <- my_table %>%
+  # start flextable 
+  flextable() %>%
+  autofit()
+
+# my_flextable 
+
+## a nicer flextable
+my_flextable <- my_table %>%
+  
+  # start flextable 
+  flextable() %>% 
+  autofit() %>%
+  
+  # add some padding between rows
+  padding(padding = 0.5) %>%
+  
+  # adjust width of first two columns
+  width(j = 1:2, width = 0.5) %>%
+  
+  # align treatment columns to center
+  align(part = "all", align = "center", j = 3:6) %>%
+  
+  # column header labels
+  set_header_labels(., values = list(
+    row_label1 = 'Variable',
+    row_label2 = ' ',
+    `var1_Xanomeline High Dose` = 'Xanomeline \nHigh Dose',
+    `var1_Xanomeline Low Dose` = 'Xanomeline \nLow Dose',
+    var1_Placebo = 'Placebo',
+    var1_Total = 'Total')) %>%
+  
+  # header + footers
+  add_header_lines(values = "Table: Demographics (Safety Analysis Set)") %>%
+  add_footer_lines(values = "This was produced in R!") %>%
+  
+  # font size, font name
+  fontsize(part = "all", size = 8)
+# font()
+# font(part = "all", fontname = "Times")  
+# This errors, perhaps version issue.  -- SZ
+
+ft <- my_flextable
+ft <- autofit(ft)
+# ft
+
+ft <- set_table_properties(ft, width = .5, layout = "autofit")
+ft
+
+library(officer)
+
+# send the flextable to .docx output
+read_docx() %>%
+  body_add_flextable(ft) %>%
+  print(target = "my_document.docx")
+
+
+```
+
+# Produce figures
+
+```{r plots}
+# Packages
+library(haven)
+library(ggplot2)
+
+# Data
+adam_path <- "https://github.com/phuse-org/TestDataFactory/raw/main/Updated/TDF_ADaM/"
+adsl <- as.data.frame(haven::read_xpt(paste0(adam_path, "adsl.xpt")))
+
+# basic scatter plot of weight vs height
+my_scatter_plot <- ggplot(adsl, aes(x = HEIGHTBL, y = WEIGHTBL)) +
+  geom_point()
+my_scatter_plot
+
+# save plot as a png file
+ggsave(plot = my_scatter_plot, 
+       filename = "my_plot_output_1.png", 
+       width = 7, 
+       height = 5, 
+       units = "in")
+
+png(filename = "my_plot_output_2.png", 
+    width = 7, 
+    height = 5, 
+    units = "in", 
+    res = 300)
+
+print(my_scatter_plot)
+dev.off()
+
+```
+
+# phuse data for plot
+
+```{r swim plot}
+# Packages
+library(haven)
+library(swimplot)
+library(dplyr)
+
+# Data
+adam_path <- "https://github.com/phuse-org/TestDataFactory/raw/main/Updated/TDF_ADaM/"
+adsl <- haven::read_xpt(paste0(adam_path, "adsl.xpt"))
+adae <- haven::read_xpt(paste0(adam_path, "adae.xpt"))
+adtte <- haven::read_xpt(paste0(adam_path, "adtte.xpt"))
+
+adsl_new <- adsl %>%
+  select(USUBJID, ARM, TRTDURD, SEX) %>%
+  slice(1:50) 
+adae_new <- adae %>%
+  select(USUBJID, AEDECOD, AESEV, AEREL, ASTDY) %>%
+  filter(USUBJID %in% adsl_new$USUBJID & ASTDY >= 0)
+adtte_new <- adtte %>%
+  select(USUBJID, EVNTDESC, AVAL) %>%
+  filter(USUBJID %in% adsl_new$USUBJID & EVNTDESC != "Study Completion Date")  
+random_duration_of_events <- sample(1:25, nrow(adtte_new), replace = T)
+adtte_new <- adtte_new %>% 
+  bind_cols(random_duration_of_events) %>%
+  mutate(Resp_end = AVAL + random_duration_of_events )
+adsl_new <- as.data.frame(adsl_new)
+adae_new <- as.data.frame(adae_new)
+adtte_new <- as.data.frame(adtte_new)
+
+swimmer_plot(df=adsl_new,
+             id='USUBJID',
+             end='TRTDURD',
+             fill='lightblue',
+             width=.85)
+
+arm_plot <- swimmer_plot(df=adsl_new,
+                         id='USUBJID',
+                         end='TRTDURD',
+                         name_fill='ARM',
+                         id_order='ARM',
+                         col="black",
+                         alpha=0.75,
+                         width=.8)
+arm_plot
+
+swim_plot_stratify <-swimmer_plot(df=adsl_new,
+                                  id='USUBJID',
+                                  end='TRTDURD',
+                                  name_fill='ARM',
+                                  col="black",
+                                  alpha=0.75,
+                                  width=.8,
+                                  base_size=14,
+                                  stratify= c('SEX'))
+swim_plot_stratify
+
+AE_plot <- arm_plot + 
+  swimmer_points(df_points=adae_new,
+                 id='USUBJID',
+                 time='ASTDY',
+                 name_shape='AESEV',
+                 size=2.5,
+                 fill='white', 
+                 name_col='AEREL')
+AE_plot
+
+Response_plot <- arm_plot +
+  swimmer_lines(df_lines=adtte_new,
+                id='USUBJID',
+                start ='AVAL',
+                end='Resp_end',
+                name_col='EVNTDESC',
+                size=1)
+Response_plot
+
+Response_plot_with_points <- Response_plot +
+  swimmer_points_from_lines(df_lines=adtte_new,
+                            id='USUBJID',
+                            start='AVAL',
+                            end='Resp_end',
+                            name_col='EVNTDESC',
+                            size=2) +
+  scale_fill_manual(name="Treatment",
+                    values=c("Placebo" ="#A9342F", 
+                             "Xanomeline High Dose"="#5B7ACE",
+                             "Xanomeline Low Dose"='#FFC300'))+
+  scale_color_manual(name="Response",
+                     values=c("grey20"))+
+  scale_shape_manual(name='',
+                     values=c(17,15),
+                     breaks=c('AVAL','Resp_end'),
+                     labels=c('Response start','Response end'))+
+  guides(fill = guide_legend(override.aes = list(shape = NA))) +
+  scale_y_continuous(name = "Time since enrollment")
+
+Response_plot_with_points
+
+# Packages
+library(gridExtra)
+library(grid)
+
+# Data
+wp <- data.frame(subjidn = 1:30,
+                 trtp = sample(c('Drug','Placebo'), replace = T, 30),
+                 aval = runif(30, min = -40, max = 40))
+
+wp %>%  head()
+
+basic_waterfall <- ggplot(wp, aes(y = aval,x = reorder(subjidn, -aval))) +
+  geom_bar(stat = "identity")
+
+basic_waterfall
+
+custom_waterfall <- ggplot(wp, aes(y = aval, x = reorder(subjidn, -aval), fill = trtp)) +                            
+  geom_bar(stat = "identity") +
+  scale_fill_manual("Planned Treatment Arm", values = c('#00bbff','#89d329')) +
+  scale_y_continuous(limits = c(-40,40), breaks = seq(-40, 40, by = 10)) +      
+  ylab("Maximum reduction of tumor size (%)\n") +                              
+  theme_light() +                                                               
+  theme(axis.title.x = element_blank(),                                         
+        axis.line.x  = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.position = "bottom")                                             
+
+custom_waterfall
+
+
+
+```
+
+
+# on a simulated data
+
+```{r simulated data plot}
+
+set.seed(100)  
+
+n <- 120   # size/records of simulated data
+
+dat_all <- 
+  data.frame(SUBJID = 120010100:(120010100+n-1),
+             AVAL = c(rnorm(round(0.8*n), 0, 20), rep(0, round(0.2*n))) %>% sample(),
+             OVERALLRESP = c("PR", "SD","PD") %>% sample(size=n, replace=TRUE),
+             AMEDGRPN = seq(10, 50, 10) %>% sample(size=n, replace=TRUE),
+             DOR = rpois(n, 40),
+             AVISIT = c("C1", "C2", "C3","EOT") %>% sample(size=n, replace=TRUE),
+             ATMLOSS_L = c("E", "L", "Data unavailable") %>% sample(size=n, replace=TRUE),
+             ATMLOSS_P = c("E", "L", "Data unavailable") %>% sample(size=n, replace=TRUE),
+             ATMLOSS_R = c("E", "L", "Data unavailable") %>% sample(size=n, replace=TRUE),
+             IDFOOT = "Bayer: /study/path/.../f_waterfall.sas               30NOV2021 16:06"
+  ) %>%
+  mutate_at(vars("OVERALLRESP", "DOR", "IDFOOT"), as.character)
+
+waterfall.plot <- dat_all %>% ggplot(aes(reorder(SUBJID, -AVAL), AVAL, fill =OVERALLRESP)) + 
+  geom_bar(stat="identity") +
+  labs(x = "Subject", 
+       y = "Best % Change from baseline \n in sum of diameters \n (target lesions)\n") +
+  scale_x_discrete(labels = function(x) stringr::str_wrap(gsub("([0-9])([0-9])", "\\1 \\2 ", x), 
+                                                          width = 5) %>% 
+                     stringr::str_replace_all(" ", "")) +
+  scale_fill_manual("Best Response",
+                    breaks = c("PR", "SD","PD"),
+                    values=c("PR"='#89d329',
+                             "SD"="#756bb1",
+                             "PD"='#00bbff')) + 
+  geom_text(aes(label = if_else(AVAL == 0,OVERALLRESP,""),fontface="bold"), 
+            vjust = -1,
+            size=3,
+            color="black") + theme_bw() +     
+  theme(
+    axis.text = element_text(size=12,color="black",face = "bold"),  
+    axis.title.y = element_text(size=12, face="bold"), 
+    axis.title.x = element_blank(),  
+    legend.background = element_rect(color = "steelblue", linetype = "solid"),
+    legend.justification = c(1, 1), 
+    legend.position = c(1, 1),
+    legend.direction = "horizontal",
+    legend.text = element_text(size=8, color = "black", face = "bold"),
+    legend.title = element_text(size=8, color = "black", face = "bold"),  
+    plot.caption = element_text(hjust = 0, size = 10, color = "blue"), 
+    plot.caption.position =  "plot"
+  ) 
+
+waterfall.plot
+
+
+var <- c("DOR", "AVISIT")
+var_label <- c("Duration (days)", "Timepoint")
+
+add.plot1 <- dat_all %>%
+  reshape2::melt(measure.vars = eval(var), value.name = "label", variable.name = "layer") %>%
+  mutate(layer = factor(layer, levels = var, labels = var_label)) %>%
+  ggplot(aes(reorder(SUBJID, -AVAL))) +
+  geom_text(aes(y = layer, label = label), size = 3, fontface = "bold") +
+  labs(y = "", x = NULL) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(
+      size = 10,
+      colour = "black",
+      face = "bold"
+    ),
+    axis.line = element_blank(),
+    axis.ticks = element_blank(),
+    axis.text.x = element_blank(),
+    panel.grid = element_blank(),
+    strip.text = element_blank()
+  ) +
+  coord_fixed(ratio = .8)
+add.plot1
+
+footnote1 <- 'Footnote1: "\\n\" can be used to split long footnote into next line.'
+footnote2 <- "Footnote2: To avoid manually adding split character. The function stringr::str_wrap   can be used here to wrap the long text with a specified width."
+footnote <- lapply(c(footnote1,
+                     footnote2,
+                     "",
+                     dat_all$IDFOOT[1]),
+                   function(x) stringr::str_wrap(x, width=120)) %>% # apply str_wrap to individual footnote
+  unlist() %>%       # convert list structure to vector
+  stringr::str_flatten('\n')  # add split character(new line) between footnotes
+
+var <- c("ATMLOSS_L", "ATMLOSS_P","ATMLOSS_R")
+var_label <- c("Local", "Prospective", "Retrospective")
+
+add.plot2 <- dat_all %>%  
+  reshape2::melt(measure.vars = eval(var), 
+                 value.name = "label",
+                 variable.name = "layer") %>%
+  mutate(label=case_when(
+    label == "L" ~ "ATM Loss",
+    label == "E" ~ "ATM Expressed",      
+    label == "9" ~ "Data unavailable",
+    TRUE ~ label
+  )) %>% 
+  mutate(layer = factor(layer, levels = rev(var), labels = rev(var_label))) %>% 
+  ggplot() +
+  aes(reorder(SUBJID, -AVAL), layer, color=label,shape=label) +
+  geom_point(size=3)+
+  scale_shape_manual(breaks = c("ATM Loss","ATM Expressed", "Data unavailable"), 
+                     values = c("ATM Loss"=15,"ATM Expressed"=0, 
+                                "Data unavailable"=7))+
+  scale_color_manual(values = c("ATM Loss"="black", "ATM Expressed"="black", 
+                                "Data unavailable"= 'black'))+
+  theme_classic()+
+  theme(axis.text=element_text(size=10, colour = "black",face = "bold"),
+        axis.title=element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text.x = element_blank(),
+        legend.title = element_blank(),
+        legend.text = element_text(size=10, color = "black", face = "bold"),
+        legend.position = "bottom",
+        panel.border = element_blank(),
+        panel.grid = element_blank(), 
+        strip.text = element_blank(),
+        plot.caption = element_text(hjust = 0, size = 10), 
+        plot.caption.position =  "plot"
+  )+
+  coord_fixed(ratio=.9)+ 
+  labs(caption = footnote)
+add.plot2
+
+p1 <- waterfall.plot %>% ggplotGrob()
+p2 <- add.plot1 %>% ggplotGrob()
+p3 <- add.plot2 %>% ggplotGrob()
+gtable_rbind(p1, p2, p3,
+             size='first') %>% grid.draw()
+
+
+```
+# The so called spider plot, really the clinical endpoint over time
+
+```{r spider plot}
+
+# Packages
+library(ggrepel)
+
+# Data
+sp <- data.frame(subjidn = rep(1:5, times = c(5,4,5,3,4)),
+                 trtp = rep(c('drug','placebo'), times = c(8,13)),
+                 avisit = c(0:4,0:3, 0:4, 0:2, 0:3),
+                 aval = c(0,5,15,20,20,
+                          0,-10,-20,-15,
+                          0,-30,-25,-35,-30,
+                          0,15,30,
+                          0,-20,-15,-20))
+
+sp
+
+basic_spider <- ggplot(sp, aes(x = avisit, y = aval, group = subjidn)) +
+  geom_line()
+
+basic_spider
+
+custom_spider <- ggplot(sp, aes(x = avisit, y = aval, group = subjidn, color = trtp)) +                             
+  geom_line() +
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_color_manual("Planned Treatment Arm", values = c('#00bbff','#89d329')) +
+  scale_y_continuous(limits = c(-40,40), breaks = seq(-40, 40, by = 10)) +      
+  ylab("Change in Target Lesion from Baseline (%)\n") +                         
+  xlab("Time (weeks)") +                                                        
+  theme_light() +                                                               
+  theme(legend.position = "bottom")                                             
+  
+custom_spider
+
+sp_ends <- sp %>% 
+  group_by(subjidn) %>% 
+  top_n(1, avisit) 
+
+custom_spider +
+  geom_text_repel(
+    aes(label = subjidn),
+    color="black",
+    data=sp_ends,
+    size = 3,
+    direction = "x",
+    hjust = 1
+  )
+
+
+
+```
+# Now, let's look at the survival analysis and its plot
+
+```{r survival}
+
+# Packages
+library(survminer)
+library(survival)
+library(broom)
+library(flextable)
+
+# Data
+adtte <- haven::read_xpt(
+  paste0("https://github.com/phuse-org/TestDataFactory/",
+         "raw/main/Updated/TDF_ADaM/adtte.xpt"))
+         
+
+surv_model <- adtte %>%
+  filter(PARAMCD == "TTDE") %>%
+  select(STUDYID, USUBJID, PARAMCD, AVAL, CNSR, TRTA) %>%
+  survfit(Surv(AVAL, 1-CNSR) ~ TRTA, data = .)
+
+head(tidy(surv_model))
+ggsurvplot(
+   fit = surv_model,
+   data = adtte,
+   risk.table = TRUE,
+   #ylab = ylabs,
+   xlab = "Months",
+   linetype = "strata",
+   conf.int = F,
+   legend.title = "Randomized Treatment",
+   legend = c(0.1, 0.1),
+   #palette = c(color_trt1,color_trt2),
+   risk.table.title = "Number of subjects at risk",
+   risk.table.y.text = F,
+   risk.table.height = .15,
+   censor.shape = 1,
+   censor.size = 3,
+   ncensor.plot = F,
+   xlim = c(0,250),
+   xscale = "d_m",
+   break.x.by = 30.4375,
+   break.y.by = .1,
+   ggtheme = theme_survminer(
+     font.main = c(10, "bold"),
+     font.submain = c(10, "bold"),
+     font.x = c(12, "bold"),
+     font.y = c(12, "bold"),
+   ) + theme(panel.border = element_rect(fill = NA)),
+   tables.theme = theme_cleantable()
+ )
+
+ggsurvplot(
+   fit = surv_model,
+   data = adtte,
+   risk.table = TRUE,
+   #ylab = ylabs,
+   xlab = "Months",
+   linetype = "strata",
+   conf.int = T,
+   legend.title = "Randomized Treatment",
+   legend = c(0.1, 0.1),
+   #palette = c(color_trt1,color_trt2),
+   risk.table.title = "Number of subjects at risk",
+   risk.table.y.text = F,
+   risk.table.height = .15,
+   censor.shape = 1,
+   censor.size = 3,
+   ncensor.plot = F,
+   #xlim = c(0,250),
+   xscale = "d_m",
+   break.x.by = 30.4375,
+   break.y.by = .1,
+   ggtheme = theme_survminer(
+     font.main = c(10, "bold"),
+     font.submain = c(10, "bold"),
+     font.x = c(12, "bold"),
+     font.y = c(12, "bold"),
+   ) + theme(panel.border = element_rect(fill = NA)),
+   tables.theme = theme_cleantable()
+ )
+
+```
+# FDA likes the scatter plot for safety
+
+```{r scatter}
+
+# Packages
+library(ggplot2)
+library(dplyr)
+
+# Data
+advs <- haven::read_xpt(
+  paste0("https://github.com/phuse-org/TestDataFactory/",
+         "raw/main/Updated/TDF_ADaM/advs.xpt"))
+
+## extract information from this dataset
+
+# This  step is to obtain baseline values for each USUBJID for the parameter and analysis time point of interest.
+baseline <- advs %>%
+  filter(
+    SAFFL == "Y",
+    PARAMCD == "SYSBP",
+    ATPT == "AFTER LYING DOWN FOR 5 MINUTES",
+    TRTA != "Placebo"
+  ) %>%
+  dplyr::select(USUBJID, TRTA, BASE) %>%
+  distinct(USUBJID, .keep_all = TRUE)
+
+# The next step is to obtain the maximum value for each USUBJID post-baseline for the same parameter and analysis time point of interest.
+
+post <- advs %>%
+  filter(
+    SAFFL == "Y",
+    PARAMCD == "SYSBP",
+    ATPT == "AFTER LYING DOWN FOR 5 MINUTES",
+    TRTA != "Placebo",
+    AVISIT != "Baseline",
+    ANL01FL == "Y"
+  ) %>%
+  dplyr::select(USUBJID, AVAL) %>%
+  group_by(USUBJID) %>%
+  arrange(desc(AVAL)) %>%
+  slice(1) %>%
+  ungroup()
+
+## use left_join to create the data
+all <- baseline %>%
+  left_join(post)
+
+ggplot(data = all, aes(x = BASE, y = AVAL)) +
+  geom_point()
+
+
+yaxis_text <- "\nMaximum Post-baseline Systolic Blood Pressure (mmHg)\n"
+xaxis_text <- "\nBaseline Systolic Blood Pressure (mmHg)"
+header <- "Figure 17. Baseline vs. Maximum Systolic Blood Pressure by Treatment Arm, Safety Population¹, Pooled Analysis\n"
+footer1 <- "Source: [include Applicant source, datasets and/or software tools used]."
+footer2 <- "¹Gray dotted line = no increase; blue line = high-dose treatment linear regression; orange dashed line = low-dose linear regression."
+
+f17 <- ggplot(all, aes(x = BASE, y = AVAL, linetype = TRTA)) +
+  geom_point(colour = "black", shape = 21, size = 4, alpha = 0.6, aes(fill = TRTA)) +
+  stat_smooth(method = "lm", se = FALSE, aes(color = TRTA)) +
+  scale_color_manual(values = c("skyblue", "orange")) +
+  scale_fill_manual(values = c("skyblue", "orange")) +
+  geom_abline(intercept = 0, slope = 1, size = 1, lty = "dotted", color = "#5A5A5A") +
+  scale_x_continuous(breaks = seq(90, 210, 30), limits = c(90, 210)) +
+  scale_y_continuous(breaks = seq(90, 210, 30), limits = c(90, 210)) +
+  labs(
+    y = yaxis_text,
+    x = xaxis_text,
+    title = header,
+    caption = paste(footer1, footer2, sep = "\n")
+  ) +
+  theme_light() +
+  theme(
+    panel.background = element_rect(fill = NA, color = "skyblue3", size = 2, linetype = "solid"),
+    plot.caption = element_text(hjust = 0),
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    axis.text = element_text(face = "bold")
+  ) 
+
+f17
+
+coef <- all %>%
+  filter(TRTA == "Xanomeline High Dose") %>%
+  lm(data = ., AVAL ~ BASE) %>%
+  coefficients()
+
+coef
+
+all %>%
+  filter(TRTA == "Xanomeline High Dose") %>%
+  ggplot(., aes(x = BASE, y = AVAL)) +
+  geom_point() +
+  stat_smooth(method = "lm", se = FALSE, size = 5) +
+  geom_abline(intercept = coef[[1]], slope = coef[[2]], color = "red")
+
+
+# altervatively, plot with patchwork::plot_annotation
+
+# setup plot text
+yaxis_text_alt <- "Maximum Post-baseline Systolic Blood Pressure (mmHg)"
+xaxis_text_alt <- "Baseline Systolic Blood Pressure (mmHg)"
+header_alt <- "Figure 17. Baseline vs. Maximum Systolic Blood Pressure by Treatment Arm, Safety Population¹, Pooled Analysis"
+footer1_alt <- "Source: [include Applicant source, datasets and/or software tools used]."
+footer2_alt <- "¹Gray dotted line = no increase; blue line = high-dose treatment linear regression; grey dashed line = low-dose linear regression."
+
+f17_alt <- ggplot(all, aes(x = BASE, y = AVAL, linetype = TRTA)) +
+  geom_point(colour = "black", shape = 21, size = 4, alpha = 0.6, aes(fill = TRTA)) +
+  stat_smooth(method = "lm", se = FALSE, aes(color = TRTA)) +
+  scale_color_manual(values = c("skyblue", "grey")) +
+  scale_fill_manual(values = c("skyblue", "white")) +
+  geom_abline(intercept = 0, slope = 1, size = 1, lty = "dotted", color = "#5A5A5A") +
+  scale_x_continuous(breaks = seq(90, 210, 30), limits = c(90, 210)) +
+  scale_y_continuous(breaks = seq(90, 210, 30), limits = c(90, 210)) +
+  labs(
+    y = yaxis_text_alt,
+    x = xaxis_text_alt
+  ) +
+  theme_bw() +
+  theme(
+    plot.background = element_rect(fill = NA, color = "skyblue3", size = 2, linetype = "solid"),
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    axis.text = element_text(face = "bold")
+  ) 
+
+# Use the patchwork package to specify title, caption (e.g. footers) and footers position (i.e. left align) to get a closer aesthetic feel.
+library(patchwork)
+f17_alt + patchwork::plot_annotation(title = header_alt,
+                                     caption = paste(footer1_alt, footer2_alt, sep = "\n"),
+                                     theme = theme(plot.caption = element_text(hjust = 0)))
+
+
+```
+# ADAE data frp, PhUSE Test Data Factory repository
+
+```{r r tornade}
+
+# Packages
+library(ggplot2)
+library(dplyr)
+library(ggh4x)
+
+# Data
+adae <- haven::read_xpt(
+  paste0("https://github.com/phuse-org/TestDataFactory/",
+         "raw/main/Updated/TDF_ADaM/adae.xpt"))
+
+# prepare data
+start <- adae %>%
+  select(TRTA, USUBJID, AESEV, AEBODSYS) %>%
+  filter(TRTA != "Placebo")
+
+event_counts <- start %>%
+  distinct(USUBJID, AEBODSYS, AESEV, .keep_all = TRUE) %>%
+  count(TRTA, AEBODSYS, AESEV)
+
+ggplot(event_counts, aes(fill = AESEV, y = n, x = reorder(AEBODSYS, n))) +
+  geom_bar(position="stack", stat="identity") +
+  coord_flip() +
+  facet_wrap(~ TRTA, scales = "free_x") +
+  #facet_wrap(~ TRTA, scales = "free_y") +
+  facetted_pos_scales(y = list(
+    scale_y_reverse(),
+    scale_y_continuous()),
+    
+  )
+
+## do some customiztion
+
+ggplot(event_counts, aes(fill = AESEV, y = n, x = reorder(AEBODSYS, n))) +
+  geom_bar(position="stack", stat="identity", color = "black") +
+  coord_flip() +
+  scale_fill_brewer(palette = "Blues") +
+  facet_wrap(~ TRTA, scales = "free_x") + 
+  facetted_pos_scales(y = list(
+    scale_y_reverse(breaks = seq(70,0,-10), limits = c(70,0)),
+    scale_y_continuous(breaks = seq(0,70,10), limits = c(0,70)))) +
+  theme_bw() + 
+  theme(legend.position = "bottom",
+        legend.title = element_blank(),
+        strip.text = element_text(color = "white"),
+        strip.background = element_rect(fill = "royalblue"),
+        axis.text = element_text(face="bold")) +
+  labs(y = "Number of Subjects", x = "System Organ Class")
+
+
+
+
+```
+
+```{r safety}
+
+### load relevant libraries and data 
+
+library(dplyr)
+library(haven)
+library(patchwork)
+library(ggplot2)
+
+
+adam_path <- "https://github.com/phuse-org/TestDataFactory/raw/main/Updated/TDF_ADaM/"
+adsl <- read_xpt(paste0(adam_path, "adsl.xpt"))
+adlb <- read_xpt(paste0(adam_path, "adlbc.xpt"))
+
+
+
+# prepare lab data set for plotting
+
+data <- adlb %>%
+  filter(PARAMCD == "SODIUM" & !is.na(AVISIT)) %>%
+  select(USUBJID, TRTA, AVISIT, PARAM, AVAL, BASE, CHG) %>%
+  mutate(AVISIT = factor(AVISIT, levels = c("Baseline", "Week 2", "Week 4", "Week 6", "Week 8", "Week 12",
+                                            "Week 16", "Week 20", "Week 24", "Week 26", "End of Treatment")))
+
+# create plot
+
+p <- data %>%
+  filter(!AVISIT %in% c("Baseline", "End of Treatment") & !is.na(AVISIT)) %>%
+  group_by(AVISIT, TRTA) %>%
+  mutate(mean_chg = mean(CHG, na.rm = TRUE),
+         se_chg = sd(CHG, na.rm = TRUE) / sqrt(length(CHG))) %>%
+  ungroup() %>%
+ggplot(., aes(x=AVISIT, y=mean_chg, group=TRTA, linetype = TRTA)) +
+  geom_errorbar(aes(ymin=mean_chg-se_chg, ymax=mean_chg+se_chg, color=TRTA), width=.1) +  
+  geom_line(aes(color=TRTA)) +
+  geom_point(aes(color=TRTA)) +
+  geom_hline(yintercept=0, linetype='dashed')+
+  scale_linetype_manual(values = c("dashed",rep("solid",2))) +
+  scale_color_manual(values=c("#93918E","#0B5A8F", "#73BDEE")) +
+  labs(x = "", y = "Mean Change from Baseline (95% CI) \n Sodium (mmol/l)") +
+  theme_minimal() +
+  theme(legend.position="bottom",
+        legend.title=element_blank()) +
+  coord_fixed() +
+  theme(aspect.ratio = 0.5)
+
+p
+
+# prepare data for table 
+
+table_data <- data %>%
+  filter(!AVISIT %in% c("Baseline", "End of Treatment") & !is.na(AVISIT)) %>%
+  group_by(AVISIT, TRTA) %>%
+  mutate(mean_chg = mean(CHG, na.rm = TRUE),
+         mean_aval  = mean(AVAL, na.rm  = TRUE),
+         n_patients = n_distinct(USUBJID),
+          n_patients = n_distinct(USUBJID), 
+         TRTA = case_when(
+           TRTA == "Xanomeline High Dose" ~"High Dose",
+           TRTA == "Xanomeline Low Dose" ~ "Low Dose",
+           TRUE ~ TRTA)) %>%
+  ungroup() %>%
+  select(TRTA, AVISIT, mean_chg, mean_aval, n_patients) %>%
+  distinct()
+
+data_table1 <- table_data %>%
+  select(-n_patients) %>%
+  mutate(value = paste0(round(mean_chg, 2), "/", round(mean_aval, 2)))
+
+data_table2 <- table_data %>%
+  select(-mean_chg, -mean_aval)
+
+# plot table 1
+
+p_table1 <- ggplot(data = data_table1, aes(x = AVISIT, y = TRTA)) +
+  scale_shape_manual(values = 1:length(data_table1$TRTA))+
+  ggpubr::geom_exec(geom_text, data = data_table1, label = data_table1$value, color = "TRTA", size=3) +
+  theme_classic() +
+  labs(title = "Mean Change from Baseline / Mean Value", x = "", y = "" ) +
+  scale_color_manual(values=c("#93918E","#0B5A8F", "#73BDEE")) +
+  theme(axis.text.y = element_text(colour = c("#93918E","#0B5A8F", "#73BDEE")),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.ticks.y=element_blank()) +
+  theme(legend.position="none",
+        panel.border = element_rect(colour = "black", fill=NA, size=1),
+        plot.title = element_text(size=10, face = "bold"))
+
+
+# just for the sake of displaying it
+
+p_table1 +
+    coord_fixed(ratio=.5)
+
+## another way to plot
+
+# plot table 2
+
+p_table2 <- ggplot(data = data_table2, aes(x = AVISIT, y = TRTA)) +
+  scale_shape_manual(values = 1:length(data_table2$TRTA))+
+  ggpubr::geom_exec(geom_text, data = data_table2, label = data_table2$n_patients, color = "TRTA", size=3) +
+  theme_classic() +
+  labs(title = "Number of Patients with Data", x = "", y = "" ) +
+  scale_color_manual(values=c("#93918E","#0B5A8F", "#73BDEE")) +
+  theme(axis.text.y = element_text(colour = c("#93918E","#0B5A8F", "#73BDEE")),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.ticks.y=element_blank()) +
+  theme(legend.position="none",
+        panel.border = element_rect(colour = "black", fill=NA, size=1),
+        plot.title = element_text(size=10, face = "bold"))
+
+# just for the sake of displaying it
+
+p_table2 +
+    coord_fixed(ratio=.5)
+
+
+# combine plots
+
+final_plot <- p + p_table1 + p_table2
+
+# display plot w/ layout
+final_plot + plot_layout(byrow = FALSE,
+                        heights = c(5,1,1))
+
+
+
+```
+
+
+
+
+
+
+

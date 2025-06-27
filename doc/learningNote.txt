@@ -1,0 +1,18 @@
+I have beening learning the clinical trial related R programming
+
+I have encountered very useful R packages 
+
+
+haven: read .xpt, sas, spss files
+
+Tplyr: contains useful packege related to ADaM SDTM data, via Phuse, 
+
+
+parameverse as well
+
+flextable()
+
+officer ()
+
+
+
